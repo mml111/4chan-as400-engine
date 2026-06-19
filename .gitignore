@@ -1,0 +1,21 @@
+# Python bytecode and cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment (Do not upload these)
+venv/
+.venv/
+env/
+.env/
+
+# IDE and Editor files
+.vscode/
+.idea/
+.DS_Store
+
+# Logs and local configuration
+*.log
+.secrets/
+*.db

@@ -1,0 +1,4 @@
+httpx
+qrcode
+Pillow
+telnetlib3
