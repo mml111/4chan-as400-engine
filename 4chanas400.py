@@ -213,13 +213,16 @@ async def render_split_media_pane(img_struct, board, writer, start_row=6):
         qr_lines.append(line_str)
 
     current_row = start_row
-    for clear_row in range(start_row, 21):
+    # Rows 6..21 (inclusive) are the pane's drawable area: row 21 is free in
+    # MEDIA_PANE (the footer is not drawn here), and both the DL receipt
+    # (rows 21-23) and the return-to-list redraw (\x1b[2J) overwrite it safely.
+    for clear_row in range(start_row, 22):
         writer.write(f"\x1b[{clear_row};1H\x1b[K")
-        
+
     max_lines = max(len(thumb_lines), len(qr_lines))
-    
+
     for i in range(max_lines):
-        if current_row >= 21: break
+        if current_row >= 22: break
         
         t_part = thumb_lines[i] if i < len(thumb_lines) else " " * 30
         q_part = qr_lines[i] if i < len(qr_lines) else ""
