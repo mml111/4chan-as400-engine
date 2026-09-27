@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import httpx
+import time
 import json
 import sys
 import textwrap
@@ -17,7 +19,7 @@ from telnetlib3 import create_server
 # ==============================================================================
 TELNET_PORT = 2324
 TERMINAL_COLS = 78
-SZ_BINARY_PATH = r"M:\BBSTELNETWEB\sz.exe"
+SPOOL_DIR = os.path.join(os.path.expanduser("~"), ".4chan-as400", "spool")
 
 # ==============================================================================
 # IBM 5250 SCREEN MANAGEMENT UTILITIES
@@ -281,6 +283,57 @@ async def fetch_full_thread(board_name, thread_id):
         return None
 
 # ==============================================================================
+# MEDIA SPOOL PIPELINE (DL COMMAND)
+# ==============================================================================
+def spool_receipt_path_and_size(b):
+    """Formats a byte count into a dense spool-receipt trailer, e.g. 1.2 MiB."""
+    n = float(b)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if n < 1024.0 or unit == "GiB":
+            return (f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}")
+        n /= 1024.0
+
+async def spool_media_asset(img_struct, board):
+    """Downloads the full-resolution asset to the local spool directory.
+    Returns (error_string, receipt_dict) - exactly one is None."""
+    raw_asset_target = img_struct["url_template"].replace("IMAGE_BOARD_PLACEHOLDER", board)
+    filename = os.path.basename(raw_asset_target)
+    if not filename:
+        filename = "asset"
+    try:
+        os.makedirs(SPOOL_DIR, mode=0o700, exist_ok=True)
+        dest_path = os.path.join(SPOOL_DIR, filename)
+    except OSError as e:
+        return f"CPF0902: Spool directory allocation failed ({e}).", None
+
+    t0 = time.time()
+    try:
+        headers = {"User-Agent": "IBM-5250-Workstation-Proxy/4.0"}
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(raw_asset_target, headers=headers)
+        if response.status_code != 200:
+            return f"CPF0903: Source rejected transfer (HTTP {response.status_code}).", None
+
+        data = response.content
+        with open(dest_path, "wb") as fh:
+            fh.write(data)
+        digest = hashlib.sha256(data).hexdigest()
+    except (httpx.TimeoutException, httpx.HTTPError) as e:
+        return f"CPF0904: Network transfer aborted ({type(e).__name__}).", None
+    except OSError as e:
+        return f"CPF0905: Spool write failed ({e}).", None
+
+    elapsed = max(time.time() - t0, 0.001)
+    receipt = {
+        "path": dest_path,
+        "size": len(data),
+        "size_str": spool_receipt_path_and_size(len(data)),
+        "speed_str": spool_receipt_path_and_size(len(data) / elapsed) + "/s",
+        "sha256": digest,
+    }
+    return None, receipt
+
+# ==============================================================================
 # INPUT DRIVER
 # ==============================================================================
 async def read_input_line(reader, writer):
@@ -331,7 +384,7 @@ async def shell(reader, writer):
     while True:
         writer.write("\x1b[23;22H\x1b[K")
         await writer.drain()
-        
+
         command_line = await read_input_line(reader, writer)
         
         if command_line is None or command_line.upper() in ("EXIT", "90"):
@@ -346,6 +399,14 @@ async def shell(reader, writer):
                 continue
         
         cmd_upper = command_line.upper()
+        
+        # A bare "1" is the "GO g" default-board shortcut on the main menu (the GO
+        # branch below handles it). On a board catalog or inside a thread it
+        # means "select thread 1" (VIEW 1) - otherwise the GO branch would
+        # swallow it and always jump to the /g/ catalog.
+        if command_line == "1" and current_view_mode in ("CATALOG", "THREAD"):
+            command_line = "VIEW 1"
+            cmd_upper = "VIEW 1"
             
         if cmd_upper == "REDRAW_PREVIOUS_PANEL":
             current_view_mode = previous_view_mode
@@ -361,11 +422,25 @@ async def shell(reader, writer):
                 command_line = "RENDER_THREAD_PAGE"
 
         if cmd_upper == "DL" and current_view_mode == "MEDIA_PANE" and active_download_struct:
-            writer.write("\x1b[21;1H\x1b[K\x1b[1;31mCPF0870: ZMODEM pipeline offline for optimization.\x1b[0m")
+            writer.write("\x1b[21;1H\x1b[K\x1b[1;33mSPOOLING MEDIA ASSET... PLEASE WAIT.\x1b[0m")
             await writer.drain()
-            await asyncio.sleep(1.0)
-            command_line = "REDRAW_PREVIOUS_PANEL"
-            cmd_upper = "REDRAW_PREVIOUS_PANEL"
+            dl_error, dl_receipt = await spool_media_asset(active_download_struct, active_board)
+            if dl_error:
+                writer.write("\x1b[21;1H\x1b[K\x1b[1;31m" + dl_error + "\x1b[0m")
+                await writer.drain()
+                await asyncio.sleep(1.0)
+            else:
+                digest_short = dl_receipt["sha256"][:12]
+                receipt_lines = [
+                    f"\x1b[1;32mCPF3100: SPOOL COMPLETE. RECORD {dl_receipt['size_str']} AT {dl_receipt['speed_str']}\x1b[0m",
+                    f"\x1b[1;37mPATH: {dl_receipt['path']}\x1b[0m",
+                    f"\x1b[1;37mSHA256: {digest_short}...\x1b[0m",
+                ]
+                for r_idx, r_line in enumerate(receipt_lines):
+                    writer.write(f"\x1b[{21 + r_idx};1H\x1b[K{r_line}\x1b[0m")
+                await writer.drain()
+                await asyncio.sleep(3.0)
+            continue
                 
         if cmd_upper == "IMG" or cmd_upper.startswith("IMG "):
             target_img_struct = None
@@ -387,7 +462,7 @@ async def shell(reader, writer):
                     current_view_mode = "MEDIA_PANE"
                     active_download_struct = target_img_struct 
                     draw_as400_header(writer, f"SPOOL MEDIA SPLIT PANEL VIEW", current_board=active_board)
-                    writer.write(f"\x1b[5;1H\x1b[K\x1b[1;32mCommands: \x1b[1;30mDL (Offline)\x1b[1;32m | \x1b[1;37m[ENTER]\x1b[1;32m = Return to text listings\x1b[0m")
+                    writer.write(f"\x1b[5;1H\x1b[K\x1b[1;32mCommands: \x1b[1;30mDL (Spool to disk)\x1b[1;32m | \x1b[1;37m[ENTER]\x1b[1;32m = Return to text listings\x1b[0m")
                     await writer.drain()
                     await render_split_media_pane(target_img_struct, active_board, writer, start_row=6)
                 else:
