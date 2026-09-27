@@ -434,9 +434,11 @@ async def shell(reader, writer):
                 await asyncio.sleep(1.0)
             else:
                 digest_short = dl_receipt["sha256"][:12]
+                home = os.path.expanduser("~")
+                path_display = ("~" + dl_receipt["path"][len(home):]) if dl_receipt["path"].startswith(home) else dl_receipt["path"]
                 receipt_lines = [
                     f"\x1b[1;32mCPF3100: SPOOL COMPLETE. RECORD {dl_receipt['size_str']} AT {dl_receipt['speed_str']}\x1b[0m",
-                    f"\x1b[1;37mPATH: {dl_receipt['path']}\x1b[0m",
+                    f"\x1b[1;37mPATH: {path_display}\x1b[0m",
                     f"\x1b[1;37mSHA256: {digest_short}...\x1b[0m",
                 ]
                 for r_idx, r_line in enumerate(receipt_lines):
