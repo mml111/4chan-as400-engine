@@ -1,65 +1,157 @@
 # 4CHAN AS/400 Terminal Engine
-A retro, text-based terminal experience that bridges the modern web with legacy enterprise workstations. This application acts as a text-mode 4chan imageboard browser designed specifically to mimic the look, feel, and navigational constraints of an IBM AS/400 (System i) minicomputer console.
 
-System Features
-IBM 5250 Emulation UI: Renders standard AS/400 menus, headers, function-key navigation footers, and system status lines.
+A retro, text-based terminal experience that bridges the modern web with legacy
+enterprise workstations. This application is a **telnet-delivered 4chan
+imageboard browser** rendered entirely in the look, feel, and navigational
+conventions of an IBM AS/400 (System i) 5250 console: green-on-black headers,
+`SYS-400` status bars, CPF-formatted messages, and a hard command line at row 23.
 
-Aspect-Ratio-Locked Terminal Imaging: Translates 4chan thumbnails into dense TrueColor half-block (▀) graphics dynamically scaled to fit perfectly within terminal boundary constraints.
+## Screenshots
 
-Dual-Pane Media & QR Spooling: When inspecting an image, the system displays the visual asset side-by-side with a generated ANSI QR code pointing to the raw external file URL.
+### 1. Main Terminal Operations Menu
 
-Asynchronous Networking: Built on telnetlib3 and httpx to deliver highly responsive screen refreshes.
+On connect, the system presents the classic AS/400 menu frame — header rule,
+option list, function-key footer, and the blinking `===>` command cursor.
 
-Prerequisites
-Ensure you have the following installed on your machine:
+![Main menu](docs/screenshots/01-main-menu.png)
 
-Python 3.8+
+### 2. Board Catalog (`GO g`)
 
-pip (Python package installer)
+`GO <board>` pulls the live board catalog over HTTPS and renders it as a
+numbered resource list — one record per thread, with subject, reply count, and
+an `*IMG` marker whenever the post carries an attached file. The header bar
+tracks the active board and page, and the footer flips to `More...` while
+pagination is available.
 
-Installation & Setup
+![Board catalog](docs/screenshots/02-board-catalog.png)
+
+### 3. Thread View (`VIEW 1`)
+
+Selecting a record opens the thread in workstation-control style: the OP is
+labeled `ORIGINAL POST (OP)` with its post number, and the body is wrapped to
+the 78-column boundary. `IMG <n>` references in the post header name the
+attached media by ordinal. Long threads page with `+` / `-`; paging past the
+root of the thread walks you back to the catalog.
+
+![Thread view](docs/screenshots/03-thread-view.png)
+
+### 4. Media Split Pane (`IMG 1`)
+
+The system's signature view. A full-resolution fetch of the post's image is
+scaled to a fixed 30×15 aspect-ratio-locked thumbnail and drawn in **TrueColor
+ANSI half-blocks** (`▀`) — the upper pixel of each cell as foreground, the
+lower as background — so the picture reads inside a plain 7-bit telnet
+session. Beside it, the engine renders an **ANSI QR code** (block-matrix
+encoding) pointing at the raw external file URL, so a phone can scan the
+terminal to open the original.
+
+The pane hints are live: `DL` spools the asset to disk, and a bare `ENTER`
+returns you to the previous text listing (catalog or thread) without
+re-fetching it.
+
+![Media split pane](docs/screenshots/04-media-pane.png)
+
+### 5. Spool Download Receipt (`DL`)
+
+`DL` downloads the full-resolution asset to `~/.4chan-as400/spool/`
+(permissions `0700`) under its original filename and prints a CPF-style
+receipt: completion code, record size and transfer rate, local path, and a
+SHA-256 prefix for integrity. Re-running `DL` on the same image overwrites the
+same spool file in place — no `_01`/`_02` duplicates. The receipt holds on
+screen for three seconds, then the pane returns to the command cursor.
+
+![Spool receipt](docs/screenshots/05-download-receipt.png)
+
+## System Features
+
+- **IBM 5250 Emulation UI** — AS/400 menu frames, `SYS-400` status headers
+  with board/page indicators, function-key footers (`F3=Exit`, `+=Next Page`),
+  dotted dividers, and CPF-formatted system messages (`CPF0801`, `CPF3100`…)
+  for both success and error conditions.
+- **Aspect-Ratio-Locked Terminal Imaging** — 4chan images are fetched at full
+  resolution, downscaled with nearest-neighbor scaling, and rendered as dense
+  TrueColor half-block (`▀`) graphics scaled to fit the 78×24 terminal
+  boundary. No escape-protocol extensions required: plain SGR TrueColor.
+- **Dual-Pane Media & QR Spooling** — inspecting an image places the rendered
+  asset beside a live-generated ANSI QR code encoding the raw external file
+  URL, so the picture and its canonical source sit on the same screen.
+- **Server-Side SPOOL Downloads** — `DL` transfers the full asset to local
+  disk with a printed receipt (size, rate, path, SHA-256), in overwrite-in-place
+  semantics, all without a ZMODEM or any out-of-band channel.
+- **Asynchronous Networking** — built on `telnetlib3` and `httpx`, the shell
+  renders screens concurrently with network I/O for responsive refreshes, and
+  each telnet session is fully isolated.
+
+## Prerequisites
+
+- Python 3.8+
+- pip (Python package installer)
+
+## Installation & Setup
+
 Clone the repository:
 
-Bash
-git clone https://github.com/your-username/4chan-as400-engine.git
+```bash
+git clone https://github.com/mml111/4chan-as400-engine.git
 cd 4chan-as400-engine
-(Optional but Recommended) Create a Virtual Environment:
+```
 
-Bash
+(Optional but recommended) create a virtual environment:
+
+```bash
 python -m venv venv
 # On Windows:
 venv\Scripts\activate
 # On macOS/Linux:
 source venv/bin/activate
+```
+
 Install dependencies:
 
-Bash
+```bash
 pip install -r requirements.txt
+```
+
 Run the server:
 
-Bash
+```bash
 python 4chanas400.py
-The console will confirm that the subsystem is operational and bound to a local TCP Telnet port (default: 2324).
+```
 
-Usage & Navigation
-Connect to your local instance using any standard Telnet client (e.g., PuTTY, Telnet, or terminal CLI) pointing to localhost on port 2324.
+The console confirms the subsystem is operational and bound to a local TCP
+telnet port (**default: 2324**).
 
-Command Reference
-GO <board> (or simply 1 for the default board): Navigate to an imageboard catalog (e.g., GO g, GO sci).
+## Usage & Navigation
 
-VIEW <option_number>: Select a thread from the catalog list to view the OP along with replies and text conversations.
+Connect with any standard telnet client (PuTTY, `telnet`, or a terminal CLI):
 
-IMG <number>: Render an ASCII/ANSI half-block visualization of the image attached to a post.
+```
+telnet localhost 2324
+```
 
-+ / -: Page forward or backward through catalog listings and long threads.
+All input is plain uppercase commands at the `===>` cursor.
 
-F3 / EXIT (or 90): Terminate the session and exit the mainframe console.
+| Command | Context | Action |
+| --- | --- | --- |
+| `GO <board>` (or bare `1`) | Main menu, or any listing | Navigate to an imageboard catalog (`GO g`, `GO sci`). From inside a catalog or thread, bare `1` also jumps to the default board's catalog. |
+| `VIEW <n>` | Catalog | Open thread record `n` (OP + replies, paginated). |
+| `IMG <n>` | Thread | Open the media split pane for image `n` on the current post (rendered thumbnail + QR). |
+| `DL` | Media split pane | Spool the full-resolution asset to `~/.4chan-as400/spool/` and print the CPF3100 receipt. |
+| `ENTER` (empty line) | Media split pane | Return to the previous text listing (thread or catalog). |
+| `+` / `-` | Catalog / Thread | Page forward / backward. `-` at a thread's root returns to the catalog. |
+| `EXIT` (or `90`) | Anywhere | Sign off the mainframe and close the session. |
 
-Project Structure
-Plaintext
+## Project Structure
+
+```
 4chan-as400-engine/
-├── 4chanas400.py         # Main execution script running the telnet/async server
-├── requirements.txt      # Required Python libraries and dependencies
+├── 4chanas400.py         # Main execution script: telnet server, 5250 renderer,
+│                         #   catalog/thread fetch, image + QR engine, spool pipeline
+├── requirements.txt      # httpx, qrcode, Pillow, telnetlib3
+├── docs/screenshots/     # Rendered screen captures (ANSI grid replay)
 └── README.md             # Project documentation and usage guide
-License
-Distributed under the MIT License. See LICENSE for more information.
+```
+
+## License
+
+Distributed under the MIT License. See `LICENSE` for more information.
